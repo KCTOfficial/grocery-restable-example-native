@@ -5,7 +5,7 @@ This is an example project. It shows how to use the
 CodeIgniter or Laravel. Feel free to run it, read it and change it. It is set up for learning, so read
 [Before going to production](#11-before-going-to-production) before you reuse any of it on a real server.
 
-Looking for the CodeIgniter 4 version? See the [https://github.com/KCTOfficial/grocery-restable-example-codeigniter4](`grocery-restable-ci4`) project.
+Looking for the CodeIgniter 4 version? See the [`grocery-restable-ci4`](https://github.com/KCTOfficial/grocery-restable-example-codeigniter4) project.
 
 ## Contents
 
