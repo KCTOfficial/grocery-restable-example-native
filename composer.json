@@ -1,0 +1,18 @@
+{
+    "name": "kct/grocery-restable-native-demo",
+    "description": "Grocery Restable demo without a framework",
+    "type": "project",
+    "require": {
+        "php": "^8.2",
+        "kctofficial/grocery-restable": "*"
+    },
+    "repositories": {
+        "grocery-restable": {
+            "type": "path",
+            "url": "C:/Users/dyazi/DataDisk/projects/kct/open-source/grocery-restable",
+            "options": { "symlink": true }
+        }
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true
+}

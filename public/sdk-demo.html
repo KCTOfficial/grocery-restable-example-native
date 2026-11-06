@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Grocery Restable SDK demo</title>
+    <style>
+        :root { --ink: #222; --muted: #666; --line: #ccc; --accent: #235a81; --bg: #f3f3f3; }
+        * { box-sizing: border-box; }
+        body { margin: 0; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--ink); background: var(--bg); }
+        main { max-width: 1100px; margin: 0 auto; padding: 24px 16px; }
+        h1 { font-size: 20px; margin: 0 0 4px; }
+        p.lead { color: var(--muted); margin: 0 0 16px; }
+        .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; background: #fff; border: 1px solid var(--line); border-radius: 6px; padding: 12px; }
+        label { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--muted); }
+        input, select, button { font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 4px; background: #fff; }
+        button { background: var(--accent); color: #fff; border-color: var(--accent); cursor: pointer; }
+        button.secondary { background: #fff; color: var(--accent); }
+        .grid { display: grid; grid-template-columns: 1fr; gap: 16px; margin-top: 16px; }
+        @media (min-width: 900px) { .grid { grid-template-columns: 3fr 2fr; } }
+        .card { background: #fff; border: 1px solid var(--line); border-radius: 6px; padding: 12px; overflow: auto; }
+        table { border-collapse: collapse; width: 100%; font-size: 13px; }
+        th, td { border: 1px solid #ddd; padding: 4px 6px; text-align: left; white-space: nowrap; max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
+        th { background: #eee; cursor: pointer; }
+        pre { margin: 0; background: #0d1117; color: #c9d1d9; padding: 12px; border-radius: 6px; overflow: auto; font-size: 12px; }
+        .status { margin-top: 8px; color: var(--muted); }
+        .error { color: #b02a37; }
+        .bar + .bar { margin-top: 8px; }
+        .user { display: flex; gap: 8px; align-items: center; }
+        .hint { font-size: 12px; color: var(--muted); align-self: center; }
+        [hidden] { display: none !important; }
+    </style>
+</head>
+<body>
+<main>
+    <h1>Grocery Restable JavaScript SDK</h1>
+    <p class="lead">This page has no build step: it imports the SDK straight from the API (<code>/api/sdk.js</code>) and reads any endpoint your key or user may use.</p>
+
+    <form class="bar" id="login" hidden>
+        <label>Email or username <input id="identity" autocomplete="username" placeholder="demo@example.com"></label>
+        <label>Password <input id="password" type="password" autocomplete="current-password" placeholder="demo12345"></label>
+        <button>Sign in</button>
+        <div id="google-button"></div>
+        <span class="hint">Demo users: demo / demo12345, editor / editor12345, disabled / disabled12345</span>
+    </form>
+    <div class="bar user" id="signed-in" hidden>
+        <span id="who"></span>
+        <button type="button" class="secondary" id="me">Reload profile</button>
+        <button type="button" class="secondary" id="logout">Sign out</button>
+        <button type="button" class="secondary" id="logout-all">Sign out everywhere</button>
+    </div>
+
+    <form class="bar" id="connect">
+        <label>API key (optional) <input id="key" size="40" placeholder="gr_... (the anon key, or a key from API keys)" autocomplete="off"></label>
+        <button>Connect</button>
+        <label>Endpoint <select id="endpoint" disabled></select></label>
+        <label>Search <input id="search" type="search" placeholder="text"></label>
+        <button type="button" class="secondary" id="prev">Prev</button>
+        <button type="button" class="secondary" id="next">Next</button>
+    </form>
+    <div class="status" id="status">Sign in, or enter a key and connect. Keys are created in the admin GUI: API &gt; API keys.</div>
+
+    <div class="grid">
+        <div class="card" id="rows">No data yet.</div>
+        <div class="card"><pre id="code"></pre></div>
+    </div>
+</main>
+
+<script type="module">
+    import GroceryRestable, { LocalAuthStore } from '/api/sdk.js';
+
+    const $ = (id) => document.getElementById(id);
+    const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+    const fail = (error) => { $('status').innerHTML = `<span class="error">${esc(error.status)} ${esc(error.code)}: ${esc(error.message)}</span>`; };
+
+    // One client for the page; the login is kept in localStorage (and shared by the tabs).
+    let savedKey = '';
+    try { savedKey = localStorage.getItem('gr-demo-key') || ''; } catch (e) { /* private mode */ }
+    $('key').value = savedKey;
+    const state = { gr: new GroceryRestable(location.origin + '/api', { apiKey: savedKey, authStore: new LocalAuthStore('gr-demo-auth') }), page: 1, perPage: 10, sort: '' };
+
+    function showCode(name) {
+        const user = state.gr.auth.user;
+        $('code').textContent = `import GroceryRestable, { LocalAuthStore } from '${location.origin}/api/sdk.js';
+
+const gr = new GroceryRestable('${location.origin}/api', { authStore: new LocalAuthStore() });
+${user ? `\nawait gr.auth.login('${user.email || user.username || ''}', '...');   // signed in as role "${state.gr.authStore.payload?.role || ''}"\n` : ''}
+const { items, totalItems } = await gr.collection('${name}').getList(${state.page}, ${state.perPage}, {${state.sort ? `\n    sort: '${state.sort}',` : ''}${$('search').value ? `\n    search: '${$('search').value}',` : ''}
+});`;
+    }
+
+    // ------------------------------------------------------------ user login
+
+    function renderUser() {
+        const user = state.gr.auth.user;
+        $('signed-in').hidden = !user;
+        $('login').hidden = Boolean(user) || !state.methods?.password && !state.methods?.google;
+        if (user) {
+            $('who').innerHTML = `Signed in as <b>${esc(user.name || user.email || user.username)}</b> (role <code>${esc(state.gr.authStore.payload?.role || 'session')}</code>)`;
+        }
+    }
+
+    async function afterSignIn() {
+        renderUser();
+        $('password').value = '';
+        await connect();
+    }
+
+    async function initLogin() {
+        try {
+            state.methods = await state.gr.auth.methods();
+        } catch (error) {
+            state.methods = null;
+        }
+        renderUser();
+        if (state.methods?.google && !state.gr.auth.user) {
+            const script = document.createElement('script');
+            script.src = 'https://accounts.google.com/gsi/client';
+            script.onload = () => {
+                google.accounts.id.initialize({
+                    client_id: state.methods.google.client_id,
+                    callback: async (response) => {
+                        try { await state.gr.auth.loginWithGoogle({ idToken: response.credential }); await afterSignIn(); } catch (error) { fail(error); }
+                    },
+                });
+                google.accounts.id.renderButton($('google-button'), { theme: 'outline', size: 'medium', text: 'signin_with' });
+            };
+            document.head.appendChild(script);
+        }
+    }
+
+    $('login').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        try {
+            await state.gr.auth.login($('identity').value.trim(), $('password').value);
+            await afterSignIn();
+        } catch (error) {
+            const wait = error.details?.retry_after ? ` (retry in ${error.details.retry_after} s)` : '';
+            fail({ ...error, message: error.message + wait });
+        }
+    });
+    $('me').addEventListener('click', async () => {
+        try { await state.gr.auth.me(); renderUser(); $('status').textContent = 'Profile reloaded from the users table.'; } catch (error) { fail(error); }
+    });
+    for (const [id, all] of [['logout', false], ['logout-all', true]]) {
+        $(id).addEventListener('click', async () => {
+            try { await state.gr.auth.logout({ all }); } catch (error) { fail(error); }
+            renderUser();
+            await connect();
+        });
+    }
+    state.gr.authStore.onChange(() => renderUser());
+
+    // ------------------------------------------------------------ data
+
+    async function connect() {
+        try {
+            const index = await state.gr.send('/');
+            const current = $('endpoint').value;
+            $('endpoint').innerHTML = index.resources.map((r) => `<option ${r.name === current ? 'selected' : ''}>${esc(r.name)}</option>`).join('');
+            $('endpoint').disabled = !index.resources.length;
+            $('status').textContent = `Connected as role "${index.role}", ${index.resources.length} endpoint(s).`;
+            state.page = 1;
+            if (index.resources.length) load(); else $('rows').textContent = 'No endpoint is readable with this role.';
+        } catch (error) {
+            fail(error);
+        }
+    }
+
+    async function load() {
+        const name = $('endpoint').value;
+        if (!state.gr || !name) return;
+        showCode(name);
+        $('status').textContent = 'Loading...';
+        try {
+            const result = await state.gr.collection(name).getList(state.page, state.perPage, { sort: state.sort, search: $('search').value });
+            const columns = result.items.length ? Object.keys(result.items[0]) : [];
+            $('rows').innerHTML = columns.length
+                ? `<table><thead><tr>${columns.map((c) => `<th data-col="${esc(c)}">${esc(c)}</th>`).join('')}</tr></thead><tbody>${result.items.map((row) => `<tr>${columns.map((c) => `<td>${esc(typeof row[c] === 'object' && row[c] !== null ? JSON.stringify(row[c]) : row[c])}</td>`).join('')}</tr>`).join('')}</tbody></table>`
+                : 'No records.';
+            $('status').textContent = `Page ${result.page} of ${result.totalPages}, ${result.totalItems} records`;
+        } catch (error) {
+            $('rows').textContent = '';
+            fail(error);
+        }
+    }
+
+    $('connect').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        try { localStorage.setItem('gr-demo-key', $('key').value); } catch (e) { /* private mode */ }
+        state.gr.apiKey = $('key').value.trim();
+        await connect();
+    });
+    $('endpoint').addEventListener('change', () => { state.page = 1; state.sort = ''; load(); });
+    $('search').addEventListener('change', () => { state.page = 1; load(); });
+    $('prev').addEventListener('click', () => { state.page = Math.max(1, state.page - 1); load(); });
+    $('next').addEventListener('click', () => { state.page += 1; load(); });
+    $('rows').addEventListener('click', (event) => {
+        const column = event.target.closest('th')?.dataset.col;
+        if (!column) return;
+        state.sort = state.sort === column ? '-' + column : column;
+        load();
+    });
+
+    initLogin().then(connect);
+</script>
+</body>
+</html>
